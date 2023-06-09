@@ -48,6 +48,12 @@ int bvlc_handler(BACNET_IP_ADDRESS *addr,
     uint16_t npdu_len);
 
 BACNET_STACK_EXPORT
+int bvlc_broadcast_handler(BACNET_IP_ADDRESS *addr,
+    BACNET_ADDRESS *src,
+    uint8_t *npdu,
+    uint16_t npdu_len);
+
+BACNET_STACK_EXPORT
 int bvlc_bbmd_enabled_handler(BACNET_IP_ADDRESS *addr,
     BACNET_ADDRESS *src,
     uint8_t *mtu,
@@ -85,6 +91,9 @@ void bvlc_init(void);
 BACNET_STACK_EXPORT
 void bvlc_debug_enable(void);
 
+BACNET_STACK_EXPORT
+void bvlc_debug_disable(void);
+
 /* send a Read BDT request */
 BACNET_STACK_EXPORT
 int bvlc_bbmd_read_bdt(BACNET_IP_ADDRESS *bbmd_addr);
@@ -99,6 +108,12 @@ int bvlc_bbmd_read_fdt(BACNET_IP_ADDRESS *bbmd_addr);
 BACNET_STACK_EXPORT
 int bvlc_register_with_bbmd(
     BACNET_IP_ADDRESS *address, uint16_t time_to_live_seconds);
+BACNET_STACK_EXPORT
+void bvlc_remote_bbmd_address(
+    BACNET_IP_ADDRESS *address);
+BACNET_STACK_EXPORT
+uint16_t bvlc_remote_bbmd_lifetime(
+    void);
 
 /* Local interface to manage BBMD.
  * The interface user needs to handle mutual exclusion if needed i.e.
@@ -112,6 +127,9 @@ BACNET_IP_BROADCAST_DISTRIBUTION_TABLE_ENTRY *bvlc_bdt_list(void);
 /* Invalidate all entries in the broadcast distribution table */
 BACNET_STACK_EXPORT
 void bvlc_bdt_list_clear(void);
+
+/* Get foreign device table list */
+BACNET_IP_FOREIGN_DEVICE_TABLE_ENTRY *bvlc_fdt_list(void);
 
 /* Backup broadcast distribution table to a file.
  * Filename is the BBMD_BACKUP_FILE constant

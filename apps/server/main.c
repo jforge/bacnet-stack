@@ -191,6 +191,7 @@ int main(int argc, char *argv[])
     uint32_t elapsed_seconds = 0;
     uint32_t elapsed_milliseconds = 0;
     uint32_t address_binding_tmr = 0;
+    BACNET_CHARACTER_STRING DeviceName;
 #if defined(INTRINSIC_REPORTING)
     uint32_t recipient_scan_tmr = 0;
 #endif
@@ -226,7 +227,6 @@ int main(int argc, char *argv[])
     if (!ctx)
         fprintf(stderr, "Failed to load config file bacnet_dev\n");
     uciId = ucix_get_option_int(ctx, "bacnet_dev", "0", "Id", 0);
-    printf("ID: %i", uciId);
     if (uciId != 0) {
         Device_Set_Object_Instance_Number(uciId);
     } else {
@@ -250,9 +250,27 @@ int main(int argc, char *argv[])
        in our device bindings list */
     address_init();
     Init_Service_Handlers();
-    if (argc > 2) {
-        Device_Object_Name_ANSI_Init(argv[2]);
+#if defined(BAC_UCI)
+    const char *uciname;
+    ctx = ucix_init("bacnet_dev");
+    if (!ctx)
+        fprintf(stderr, "Failed to load config file bacnet_dev\n");
+    uciname = ucix_get_option(ctx, "bacnet_dev", "0", "Name");
+    if (uciname != 0) {
+        Device_Object_Name_ANSI_Init(uciname);
+    } else {
+#endif /* defined(BAC_UCI) */
+        if (argc > 2) {
+            Device_Object_Name_ANSI_Init(argv[2]);
+        }
+#if defined(BAC_UCI)
     }
+    ucix_cleanup(ctx);
+#endif /* defined(BAC_UCI) */
+    if (Device_Object_Name(Device_Object_Instance_Number(), &DeviceName)) {
+        printf("BACnet Device Name: %s\n", DeviceName.value);
+    }
+
     dlenv_init();
     atexit(datalink_cleanup);
     /* configure the timeout values */

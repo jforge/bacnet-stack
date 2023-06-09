@@ -266,7 +266,6 @@ int bacapp_decode_context_timestamp(
     return len;
 }
 
-#if PRINT_ENABLED
 /**
  * @brief Parse an ascii string for the timestamp
  * @param btime - #BACNET_TIME structure
@@ -285,8 +284,7 @@ bool bacapp_timestamp_init_ascii(BACNET_TIMESTAMP *timestamp, const char *ascii)
     int sequence;
     int count = 0;
 
-    count = sscanf(
-        ascii, "%3d:%3d:%3d.%3d", &hour, &min, &sec, &hundredths);
+    count = sscanf(ascii, "%3d:%3d:%3d.%3d", &hour, &min, &sec, &hundredths);
     if (count == 4) {
         timestamp->tag = TIME_STAMP_TIME;
         timestamp->value.time.hour = (uint8_t)hour;
@@ -310,13 +308,12 @@ bool bacapp_timestamp_init_ascii(BACNET_TIMESTAMP *timestamp, const char *ascii)
         status = true;
     }
     if (!status) {
-        count =
-            sscanf(ascii, "%4d/%3d/%3d-%3d:%3d:%3d.%3d",
-            &year, &month, &day, &hour, &min, &sec, &hundredths);
+        count = sscanf(ascii, "%4d/%3d/%3d-%3d:%3d:%3d.%3d", &year, &month,
+            &day, &hour, &min, &sec, &hundredths);
         if (count >= 3) {
             timestamp->tag = TIME_STAMP_DATETIME;
-            datetime_set_date(&timestamp->value.dateTime.date,
-                (uint16_t)year, (uint8_t)month, (uint8_t)day);
+            datetime_set_date(&timestamp->value.dateTime.date, (uint16_t)year,
+                (uint8_t)month, (uint8_t)day);
             if (count >= 7) {
                 datetime_set_time(&timestamp->value.dateTime.time,
                     (uint8_t)hour, (uint8_t)min, (uint8_t)sec,
@@ -328,8 +325,8 @@ bool bacapp_timestamp_init_ascii(BACNET_TIMESTAMP *timestamp, const char *ascii)
                 datetime_set_time(&timestamp->value.dateTime.time,
                     (uint8_t)hour, (uint8_t)min, 0, 0);
             } else if (count >= 4) {
-                datetime_set_time(&timestamp->value.dateTime.time,
-                    (uint8_t)hour, 0, 0, 0);
+                datetime_set_time(
+                    &timestamp->value.dateTime.time, (uint8_t)hour, 0, 0, 0);
             } else {
                 datetime_set_time(&timestamp->value.dateTime.time, 0, 0, 0, 0);
             }
@@ -347,147 +344,3 @@ bool bacapp_timestamp_init_ascii(BACNET_TIMESTAMP *timestamp, const char *ascii)
 
     return status;
 }
-#endif
-
-#ifdef BAC_TEST
-
-#include <assert.h>
-#include <string.h>
-#include "ctest.h"
-
-void testTimestampSequence(Test *pTest)
-{
-    BACNET_TIMESTAMP testTimestampIn;
-    BACNET_TIMESTAMP testTimestampOut;
-    uint8_t buffer[MAX_APDU];
-    int inLen;
-    int outLen;
-
-    testTimestampIn.tag = TIME_STAMP_SEQUENCE;
-    testTimestampIn.value.sequenceNum = 0x1234;
-
-    memset(&testTimestampOut, 0, sizeof(testTimestampOut));
-
-    inLen = bacapp_encode_context_timestamp(buffer, 2, &testTimestampIn);
-    outLen = bacapp_decode_context_timestamp(buffer, 2, &testTimestampOut);
-
-    ct_test(pTest, inLen == outLen);
-    ct_test(pTest, testTimestampIn.tag == testTimestampOut.tag);
-    ct_test(pTest,
-        testTimestampIn.value.sequenceNum ==
-            testTimestampOut.value.sequenceNum);
-}
-
-void testTimestampTime(Test *pTest)
-{
-    BACNET_TIMESTAMP testTimestampIn;
-    BACNET_TIMESTAMP testTimestampOut;
-    uint8_t buffer[MAX_APDU];
-    int inLen;
-    int outLen;
-
-    testTimestampIn.tag = TIME_STAMP_TIME;
-    testTimestampIn.value.time.hour = 1;
-    testTimestampIn.value.time.min = 2;
-    testTimestampIn.value.time.sec = 3;
-    testTimestampIn.value.time.hundredths = 4;
-
-    memset(&testTimestampOut, 0, sizeof(testTimestampOut));
-
-    inLen = bacapp_encode_context_timestamp(buffer, 2, &testTimestampIn);
-    outLen = bacapp_decode_context_timestamp(buffer, 2, &testTimestampOut);
-
-    ct_test(pTest, inLen == outLen);
-    ct_test(pTest, testTimestampIn.tag == testTimestampOut.tag);
-    ct_test(pTest,
-        testTimestampIn.value.time.hour == testTimestampOut.value.time.hour);
-    ct_test(pTest,
-        testTimestampIn.value.time.min == testTimestampOut.value.time.min);
-    ct_test(pTest,
-        testTimestampIn.value.time.sec == testTimestampOut.value.time.sec);
-    ct_test(pTest,
-        testTimestampIn.value.time.hundredths ==
-            testTimestampOut.value.time.hundredths);
-}
-
-void testTimestampTimeDate(Test *pTest)
-{
-    BACNET_TIMESTAMP testTimestampIn;
-    BACNET_TIMESTAMP testTimestampOut;
-    uint8_t buffer[MAX_APDU];
-    int inLen;
-    int outLen;
-
-    testTimestampIn.tag = TIME_STAMP_DATETIME;
-    testTimestampIn.value.dateTime.time.hour = 1;
-    testTimestampIn.value.dateTime.time.min = 2;
-    testTimestampIn.value.dateTime.time.sec = 3;
-    testTimestampIn.value.dateTime.time.hundredths = 4;
-
-    testTimestampIn.value.dateTime.date.year = 1901;
-    testTimestampIn.value.dateTime.date.month = 1;
-    testTimestampIn.value.dateTime.date.wday = 2;
-    testTimestampIn.value.dateTime.date.day = 3;
-
-    memset(&testTimestampOut, 0, sizeof(testTimestampOut));
-
-    inLen = bacapp_encode_context_timestamp(buffer, 2, &testTimestampIn);
-    outLen = bacapp_decode_context_timestamp(buffer, 2, &testTimestampOut);
-
-    ct_test(pTest, inLen == outLen);
-    ct_test(pTest, testTimestampIn.tag == testTimestampOut.tag);
-    ct_test(pTest,
-        testTimestampIn.value.dateTime.time.hour ==
-            testTimestampOut.value.dateTime.time.hour);
-    ct_test(pTest,
-        testTimestampIn.value.dateTime.time.min ==
-            testTimestampOut.value.dateTime.time.min);
-    ct_test(pTest,
-        testTimestampIn.value.dateTime.time.sec ==
-            testTimestampOut.value.dateTime.time.sec);
-    ct_test(pTest,
-        testTimestampIn.value.dateTime.time.hundredths ==
-            testTimestampOut.value.dateTime.time.hundredths);
-
-    ct_test(pTest,
-        testTimestampIn.value.dateTime.date.year ==
-            testTimestampOut.value.dateTime.date.year);
-    ct_test(pTest,
-        testTimestampIn.value.dateTime.date.month ==
-            testTimestampOut.value.dateTime.date.month);
-    ct_test(pTest,
-        testTimestampIn.value.dateTime.date.wday ==
-            testTimestampOut.value.dateTime.date.wday);
-    ct_test(pTest,
-        testTimestampIn.value.dateTime.date.day ==
-            testTimestampOut.value.dateTime.date.day);
-}
-
-#ifdef TEST_TIME_STAMP
-
-int main(void)
-{
-    Test *pTest;
-    bool rc;
-
-    pTest = ct_create("BACnet Time Stamp", NULL);
-    /* individual tests */
-    rc = ct_addTestFunction(pTest, testTimestampSequence);
-    assert(rc);
-
-    rc = ct_addTestFunction(pTest, testTimestampTime);
-    assert(rc);
-
-    rc = ct_addTestFunction(pTest, testTimestampTimeDate);
-    assert(rc);
-
-    ct_setStream(pTest, stdout);
-    ct_run(pTest);
-    (void)ct_report(pTest);
-    ct_destroy(pTest);
-
-    return 0;
-}
-
-#endif /* TEST_TIME_STAMP */
-#endif /* BAC_TEST */

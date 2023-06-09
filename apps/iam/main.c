@@ -108,40 +108,48 @@ static void print_help(char *filename)
 {
     printf("Send BACnet I-Am message for a device.\n");
     printf("--mac A\n"
-           "Optional BACnet mac address."
-           "Valid ranges are from 00 to FF (hex) for MS/TP or ARCNET,\n"
-           "or an IP string with optional port number like 10.1.2.3:47808\n"
-           "or an Ethernet MAC in hex like 00:21:70:7e:32:bb\n"
-           "\n"
-           "--dnet N\n"
-           "Optional BACnet network number N for directed requests.\n"
-           "Valid range is from 0 to 65535 where 0 is the local connection\n"
-           "and 65535 is network broadcast.\n"
-           "\n"
-           "--dadr A\n"
-           "Optional BACnet mac address on the destination BACnet network "
-           "number.\n"
-           "Valid ranges are from 00 to FF (hex) for MS/TP or ARCNET,\n"
-           "or an IP string with optional port number like 10.1.2.3:47808\n"
-           "or an Ethernet MAC in hex like 00:21:70:7e:32:bb\n"
-           "--repeat\n"
-           "Send the message repeatedly until signalled to quit.\n"
-           "Default is to not repeat, sending only a single message.\n"
-           "\n"
-           "--delay\n"
-           "Delay, in milliseconds, between repeated messages.\n"
-           "Default delay is 100ms.\n"
-           "\n");
-    printf(
-        "device-instance:\n"
-        "    BACnet device-ID 0..4194303\n"
-        "vendor-id:\n"
-        "    Vendor Identifier 0..65535\n"
-        "max-apdu:\n"
-        "    Maximum APDU size 50..65535\n"
-        "segmentation:\n"
-        "    BACnet Segmentation 0=both, 1=transmit, 2=receive, 3=none\n"
-        "To send an I-Am message for instance=1234 vendor-id=260 max-apdu=480\n"
+        "Optional BACnet mac address."
+        "Valid ranges are from 00 to FF (hex) for MS/TP or ARCNET,\n"
+        "or an IP string with optional port number like 10.1.2.3:47808\n"
+        "or an Ethernet MAC in hex like 00:21:70:7e:32:bb\n");
+    printf("\n");
+    printf("--dnet N\n"
+        "Optional BACnet network number N for directed requests.\n"
+        "Valid range is from 0 to 65535 where 0 is the local connection\n"
+        "and 65535 is network broadcast.\n");
+    printf("\n");
+    printf("--dadr A\n"
+        "Optional BACnet mac address on the destination BACnet network number.\n"
+        "Valid ranges are from 00 to FF (hex) for MS/TP or ARCNET,\n"
+        "or an IP string with optional port number like 10.1.2.3:47808\n"
+        "or an Ethernet MAC in hex like 00:21:70:7e:32:bb\n");
+    printf("\n");
+    printf("--repeat\n"
+        "Send the message repeatedly until signalled to quit.\n"
+        "Default is to not repeat, sending only a single message.\n");
+    printf("\n");
+    printf("--retry C\n"
+        "Send the message C number of times\n"
+        "Default is retry 0, only sending one time.\n");
+    printf("\n");
+    printf("--delay\n"
+        "Delay, in milliseconds, between repeated messages.\n"
+        "Default delay is 100ms.\n");
+    printf("\n");
+    printf("device-instance:\n"
+        "BACnet device-ID 0..4194303\n");
+    printf("\n");
+    printf("vendor-id:\n"
+        "Vendor Identifier 0..65535\n");
+    printf("\n");
+    printf("max-apdu:\n"
+        "Maximum APDU size 50..65535\n");
+    printf("\n");
+    printf("segmentation:\n"
+        "BACnet Segmentation 0=both, 1=transmit, 2=receive, 3=none\n");
+    printf("\n");
+    printf("Example:\n"
+        "To send an I-Am message of instance=1234 vendor-id=260 max-apdu=480\n"
         "%s 1234 260 480\n",
         filename);
 }
@@ -160,6 +168,7 @@ int main(int argc, char *argv[])
     int argi = 0;
     unsigned int target_args = 0;
     char *filename = NULL;
+    long retry_count = 0;
 
     filename = filename_remove_path(argv[0]);
     for (argi = 1; argi < argc; argi++) {
@@ -179,7 +188,7 @@ int main(int argc, char *argv[])
         }
         if (strcmp(argv[argi], "--mac") == 0) {
             if (++argi < argc) {
-                if (address_mac_from_ascii(&mac, argv[argi])) {
+                if (bacnet_address_mac_from_ascii(&mac, argv[argi])) {
                     specific_address = true;
                 }
             }
@@ -192,18 +201,22 @@ int main(int argc, char *argv[])
             }
         } else if (strcmp(argv[argi], "--dadr") == 0) {
             if (++argi < argc) {
-                if (address_mac_from_ascii(&adr, argv[argi])) {
+                if (bacnet_address_mac_from_ascii(&adr, argv[argi])) {
                     specific_address = true;
                 }
             }
         } else if (strcmp(argv[argi], "--repeat") == 0) {
             repeat_forever = true;
+        } else if (strcmp(argv[argi], "--retry") == 0) {
+            if (++argi < argc) {
+                retry_count = strtol(argv[argi], NULL, 0);
+                if (retry_count < 0) {
+                    retry_count = 0;
+                }
+            }
         } else if (strcmp(argv[argi], "--delay") == 0) {
             if (++argi < argc) {
                 timeout = strtol(argv[argi], NULL, 0);
-                if (timeout < 0) {
-                    timeout = 0;
-                }
             }
         } else {
             if (target_args == 0) {
@@ -265,7 +278,7 @@ int main(int argc, char *argv[])
     do {
         Send_I_Am_To_Network(&dest, Target_Device_ID, Target_Max_APDU,
             Target_Segmentation, Target_Vendor_ID);
-        if (repeat_forever) {
+        if (repeat_forever || retry_count) {
             /* returns 0 bytes on timeout */
             pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
             /* process */
@@ -275,8 +288,11 @@ int main(int argc, char *argv[])
             if (Error_Detected) {
                 break;
             }
+            if (retry_count > 0) {
+                retry_count--;
+            }
         }
-    } while (repeat_forever);
+    } while (repeat_forever || retry_count);
 
     return 0;
 }

@@ -65,7 +65,7 @@ extern "C" {
         BACNET_DATE_TIME Event_Time_Stamps[MAX_BACNET_EVENT_TRANSITION];
         /* time to generate event notification */
         uint32_t Remaining_Time_Delay;
-        /* AckNotification informations */
+        /* AckNotification information */
         ACK_NOTIFICATION Ack_notify_data;
 #endif
     } ANALOG_INPUT_DESCR;
@@ -197,13 +197,6 @@ extern "C" {
     BACNET_STACK_EXPORT
     void Analog_Input_Init(
         void);
-
-#ifdef BAC_TEST
-#include "ctest.h"
-    BACNET_STACK_EXPORT
-    void testAnalogInput(
-        Test * pTest);
-#endif
 
 #ifdef __cplusplus
 }

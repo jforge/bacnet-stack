@@ -1,26 +1,26 @@
 /**************************************************************************
-*
-* Copyright (C) 2012 Steve Karg <skarg@users.sourceforge.net>
-*
-* Permission is hereby granted, free of charge, to any person obtaining
-* a copy of this software and associated documentation files (the
-* "Software"), to deal in the Software without restriction, including
-* without limitation the rights to use, copy, modify, merge, publish,
-* distribute, sublicense, and/or sell copies of the Software, and to
-* permit persons to whom the Software is furnished to do so, subject to
-* the following conditions:
-*
-* The above copyright notice and this permission notice shall be included
-* in all copies or substantial portions of the Software.
-*
-* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*********************************************************************/
+ *
+ * Copyright (C) 2012 Steve Karg <skarg@users.sourceforge.net>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *********************************************************************/
 #ifndef BACDCODE_H
 #define BACDCODE_H
 
@@ -34,6 +34,19 @@
 #include "bacnet/bacint.h"
 #include "bacnet/bacreal.h"
 #include "bacnet/bits.h"
+
+/**
+ * @brief Encode a BACnetARRAY property element; a function template
+ * @param object_instance [in] BACnet network port object instance number
+ * @param array_index [in] array index requested:
+ *    0 to N for individual array members
+ * @param apdu [out] Buffer in which the APDU contents are built, or NULL to
+ * return the length of buffer if it had been built
+ * @return The length of the apdu encoded or
+ *   BACNET_STATUS_ERROR for ERROR_CODE_INVALID_ARRAY_INDEX
+ */
+typedef int (*bacnet_array_property_element_encode_function)(
+    uint32_t object_instance, BACNET_ARRAY_INDEX array_index, uint8_t *apdu);
 
 #ifdef __cplusplus
 extern "C" {
@@ -215,10 +228,16 @@ extern "C" {
         uint8_t * apdu,
         BACNET_OBJECT_TYPE * object_type,
         uint32_t * object_instance);
+    int decode_object_id_safe(
+        uint8_t * apdu,
+        uint32_t len_value,
+        BACNET_OBJECT_TYPE * object_type,
+        uint32_t * object_instance);
 
     BACNET_STACK_EXPORT
     int bacnet_object_id_decode(
         uint8_t * apdu,
+        uint16_t apdu_len_max,
         uint32_t len_value,
         BACNET_OBJECT_TYPE * object_type,
         uint32_t * instance);
@@ -609,32 +628,34 @@ extern "C" {
         uint8_t tag_number,
         BACNET_ADDRESS * destination);
 
+    BACNET_STACK_EXPORT
+    int bacnet_array_encode(
+        uint32_t object_instance,
+        BACNET_ARRAY_INDEX array_index,
+        bacnet_array_property_element_encode_function encoder,
+        BACNET_UNSIGNED_INTEGER array_size,
+        uint8_t *apdu,
+        int max_apdu);
+
 /* from clause 20.2.1.2 Tag Number */
 /* true if extended tag numbering is used */
-#define IS_EXTENDED_TAG_NUMBER(x) ((x & 0xF0) == 0xF0)
+#define IS_EXTENDED_TAG_NUMBER(x) (((x) & 0xF0) == 0xF0)
 
 /* from clause 20.2.1.3.1 Primitive Data */
 /* true if the extended value is used */
-#define IS_EXTENDED_VALUE(x) ((x & 0x07) == 5)
+#define IS_EXTENDED_VALUE(x) (((x) & 0x07) == 5)
 
 /* from clause 20.2.1.1 Class */
 /* true if the tag is context specific */
-#define IS_CONTEXT_SPECIFIC(x) ((x & BIT(3)) == BIT(3))
+#define IS_CONTEXT_SPECIFIC(x) (((x) & BIT(3)) == BIT(3))
 
 /* from clause 20.2.1.3.2 Constructed Data */
 /* true if the tag is an opening tag */
-#define IS_OPENING_TAG(x) ((x & 0x07) == 6)
+#define IS_OPENING_TAG(x) (((x) & 0x07) == 6)
 
 /* from clause 20.2.1.3.2 Constructed Data */
 /* true if the tag is a closing tag */
-#define IS_CLOSING_TAG(x) ((x & 0x07) == 7)
-
-#ifdef BAC_TEST
-#include "ctest.h"
-    BACNET_STACK_EXPORT
-    void test_BACDCode(
-        Test * pTest);
-#endif
+#define IS_CLOSING_TAG(x) (((x) & 0x07) == 7)
 
 #ifdef __cplusplus
 }

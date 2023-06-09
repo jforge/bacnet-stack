@@ -42,6 +42,7 @@
 #include "bacnet/bytes.h"
 #include "bacnet/iam.h"
 #include "bacnet/version.h"
+#include "bacnet/datetime.h"
 /* basic datalink, timer, and filename */
 #include "bacnet/datalink/dlmstp.h"
 #include "bacnet/basic/sys/mstimer.h"
@@ -71,8 +72,8 @@ static volatile struct mstp_port_struct_t MSTP_Port;
 /* track the receive state to know when there is a broken packet */
 static MSTP_RECEIVE_STATE MSTP_Receive_State = MSTP_RECEIVE_STATE_IDLE;
 /* buffers needed by mstp port struct */
-static uint8_t RxBuffer[MAX_MPDU];
-static uint8_t TxBuffer[MAX_MPDU];
+static uint8_t RxBuffer[DLMSTP_MPDU_MAX];
+static uint8_t TxBuffer[DLMSTP_MPDU_MAX];
 /* method to tell main loop to exit from CTRL-C or other signals */
 static volatile bool Exit_Requested;
 /* flag to indicate Wireshark is running the show - no stdout or stderr */
@@ -400,11 +401,13 @@ static void packet_statistics_clear(void)
 
 static uint32_t Timer_Silence(void *pArg)
 {
+    (void)pArg;
     return mstimer_elapsed(&Silence_Timer);
 }
 
 static void Timer_Silence_Reset(void *pArg)
 {
+    (void)pArg;
     mstimer_set(&Silence_Timer, 0);
 }
 
@@ -532,15 +535,14 @@ static size_t data_write_header(
 
 static void filename_create(char *filename)
 {
-    time_t my_time;
-    struct tm *today;
+    BACNET_DATE bdate;
+    BACNET_TIME btime;
 
     if (filename) {
-        my_time = time(NULL);
-        today = localtime(&my_time);
-        sprintf(filename, "mstp_%04d%02d%02d%02d%02d%02d.cap",
-            1900 + today->tm_year, 1 + today->tm_mon, today->tm_mday,
-            today->tm_hour, today->tm_min, today->tm_sec);
+        datetime_local(&bdate, &btime, NULL, NULL);
+        sprintf(filename, "mstp_%04d%02d%02d%02d%02d%02d.cap", (int)bdate.year,
+            (int)bdate.month, (int)bdate.day, (int)btime.hour, (int)btime.min,
+            (int)btime.sec);
     }
 }
 
@@ -589,6 +591,7 @@ static void write_received_packet(
     uint32_t ts_usec = 0; /* timestamp microseconds */
     uint32_t incl_len = 0; /* number of octets of packet saved in file */
     uint32_t orig_len = 0; /* actual length of packet */
+    uint32_t data_crc_len = 2;
     uint8_t header[MSTP_HEADER_MAX] = { 0 }; /* MS/TP header */
     struct timeval tv;
     size_t max_data = 0;
@@ -606,7 +609,13 @@ static void write_received_packet(
         if (mstp_port->ReceivedInvalidFrame) {
             if (mstp_port->Index) {
                 max_data = min(mstp_port->InputBufferSize, mstp_port->Index);
-                incl_len = orig_len = header_len + max_data + 2 /* checksum*/;
+                if ((mstp_port->DataLength > 0) &&
+                    (mstp_port->Index == (mstp_port->DataLength + 1))) {
+                    /* case where index is not incremented for CRC2,
+                        so only 1 for checksum */
+                    data_crc_len = 1;
+                }
+                incl_len = orig_len = header_len + max_data + data_crc_len;
             } else {
                 /* header only */
                 incl_len = orig_len = header_len;
@@ -615,7 +624,7 @@ static void write_received_packet(
             if (mstp_port->DataLength) {
                 max_data =
                     min(mstp_port->InputBufferSize, mstp_port->DataLength);
-                incl_len = orig_len = header_len + max_data + 2 /* checksum*/;
+                incl_len = orig_len = header_len + max_data + data_crc_len;
             } else {
                 /* header only - or at least some bytes of the header */
                 incl_len = orig_len = header_len;
@@ -924,9 +933,9 @@ static void print_help(char *filename)
     printf("Captures MS/TP packets from a serial interface\n"
            "and saves them to a file. Saves packets in a\n"
            "filename mstp_20090123091200.cap that has data and time.\n"
-           "After receiving 65535 packets, a new file is created.\n"
-           "\n"
-           "Command line options:\n"
+           "After receiving 65535 packets, a new file is created.\n");
+    printf("\n");
+    printf("Command line options:\n"
            "[--extcap-interface port] - serial interface.\n"
 #if defined(_WIN32)
            "    Supported values: COM1, COM2, etc.\n"

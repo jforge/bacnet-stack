@@ -34,6 +34,7 @@
 #include "bacnet/bacnet_stack_exports.h"
 #include "bacnet/bacdef.h"
 #include "bacnet/bacenum.h"
+#include "bacnet/list_element.h"
 #include "bacnet/wp.h"
 #include "bacnet/rd.h"
 #include "bacnet/rp.h"
@@ -91,7 +92,7 @@ typedef bool(
 
 /** Helper function to step through an array of objects and find either the
  * first one or the next one of a given type. Used to step through an array
- * of objects which is not necessarily contiguious for each type i.e. the
+ * of objects which is not necessarily contiguous for each type i.e. the
  * index for the 'n'th object of a given type is not necessarily 'n'.
  * @ingroup ObjHelpers
  * @param [in] The index of the current object or a value of ~0 to indicate
@@ -165,6 +166,8 @@ typedef struct object_functions {
     object_cov_function Object_COV;
     object_cov_clear_function Object_COV_Clear;
     object_intrinsic_reporting_function Object_Intrinsic_Reporting;
+    list_element_function Object_Add_List_Element;
+    list_element_function Object_Remove_List_Element;
 } object_functions_t;
 
 /* String Lengths - excluding any nul terminator */
@@ -298,6 +301,7 @@ extern "C" {
     BACNET_STACK_EXPORT
     bool Device_Valid_Object_Instance_Number(
         uint32_t object_id);
+        
     BACNET_STACK_EXPORT
     unsigned Device_Object_List_Count(
         void);
@@ -306,6 +310,11 @@ extern "C" {
         uint32_t array_index,
         BACNET_OBJECT_TYPE *object_type,
         uint32_t * instance);
+    BACNET_STACK_EXPORT
+    int Device_Object_List_Element_Encode(
+        uint32_t object_instance, 
+        BACNET_ARRAY_INDEX array_index, 
+        uint8_t *apdu);
 
     BACNET_STACK_EXPORT
     unsigned Device_Count(
@@ -426,6 +435,14 @@ extern "C" {
         BACNET_WRITE_PROPERTY_DATA * wp_data);
 
     BACNET_STACK_EXPORT
+    int Device_Add_List_Element(
+        BACNET_LIST_ELEMENT_DATA *list_element);
+
+    BACNET_STACK_EXPORT
+    int Device_Remove_List_Element(
+        BACNET_LIST_ELEMENT_DATA *list_element);
+
+    BACNET_STACK_EXPORT
     bool DeviceGetRRInfo(
         BACNET_READ_RANGE_DATA * pRequest,      /* Info on the request */
         RR_PROP_INFO * pInfo);  /* Where to put the information */
@@ -512,7 +529,7 @@ extern "C" {
         void);
     BACNET_STACK_EXPORT
     int Routed_Device_Service_Approval(
-        BACNET_CONFIRMED_SERVICE service,
+        BACNET_SERVICES_SUPPORTED service,
         int service_argument,
         uint8_t * apdu_buff,
         uint8_t invoke_id);

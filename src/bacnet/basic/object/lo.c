@@ -82,7 +82,11 @@ static const int Lighting_Output_Properties_Required[] = {
     PROP_BLINK_WARN_ENABLE, PROP_EGRESS_TIME, PROP_EGRESS_ACTIVE,
     PROP_DEFAULT_FADE_TIME, PROP_DEFAULT_RAMP_RATE, PROP_DEFAULT_STEP_INCREMENT,
     PROP_PRIORITY_ARRAY, PROP_RELINQUISH_DEFAULT,
-    PROP_LIGHTING_COMMAND_DEFAULT_PRIORITY, -1
+    PROP_LIGHTING_COMMAND_DEFAULT_PRIORITY,
+#if (BACNET_PROTOCOL_REVISION >= 17)
+    PROP_CURRENT_COMMAND_PRIORITY,
+#endif
+    -1
 };
 static const int Lighting_Output_Properties_Optional[] = { -1 };
 
@@ -212,58 +216,33 @@ float Lighting_Output_Present_Value(uint32_t object_instance)
 }
 
 /**
- * For a given object instance-number, determines the value at a
- * given priority.
- *
- * @param  object_instance - object-instance number of the object
- * @param  priority - priority 1..16
- *
- * @return  priority-value of the object
+ * @brief Encode a BACnetARRAY property element
+ * @param object_instance [in] BACnet network port object instance number
+ * @param priority [in] array index requested:
+ *    0 to N for individual array members
+ * @param apdu [out] Buffer in which the APDU contents are built, or NULL to
+ * return the length of buffer if it had been built
+ * @return The length of the apdu encoded or
+ *   BACNET_STATUS_ERROR for ERROR_CODE_INVALID_ARRAY_INDEX
  */
-static float Lighting_Output_Priority_Value(
-    uint32_t object_instance, unsigned priority)
+static int Lighting_Output_Priority_Array_Encode(
+    uint32_t object_instance, BACNET_ARRAY_INDEX priority, uint8_t *apdu)
 {
-    float value = 0.0;
+    int apdu_len = BACNET_STATUS_ERROR;
+    float real_value = 0.0;
     unsigned index = 0;
 
     index = Lighting_Output_Instance_To_Index(object_instance);
-    if (index < MAX_LIGHTING_OUTPUTS) {
-        if (priority && (priority <= BACNET_MAX_PRIORITY)) {
-            priority--;
-            value = Lighting_Output[index].Priority_Array[priority];
+    if ((index < MAX_LIGHTING_OUTPUTS) && (priority < BACNET_MAX_PRIORITY)) {
+        if (BIT_CHECK(Lighting_Output[index].Priority_Active_Bits, priority)) {
+            real_value = Lighting_Output[index].Priority_Array[priority];
+            apdu_len = encode_application_real(apdu, real_value);
+        } else {
+            apdu_len = encode_application_null(apdu);
         }
     }
 
-    return value;
-}
-
-/**
- * For a given object instance-number, determines if the given priority
- * is active or NULL.
- *
- * @param  object_instance - object-instance number of the object
- * @param  priority - priority 1..16
- *
- * @return  true if the priority slot is active
- */
-static bool Lighting_Output_Priority_Active(
-    uint32_t object_instance, unsigned priority)
-{
-    bool status = false;
-    unsigned index = 0;
-
-    index = Lighting_Output_Instance_To_Index(object_instance);
-    if (index < MAX_LIGHTING_OUTPUTS) {
-        if (priority && (priority <= BACNET_MAX_PRIORITY)) {
-            priority--;
-            if (BIT_CHECK(
-                    Lighting_Output[index].Priority_Active_Bits, priority)) {
-                status = true;
-            }
-        }
-    }
-
-    return status;
+    return apdu_len;
 }
 
 /**
@@ -394,10 +373,10 @@ bool Lighting_Output_Lighting_Command_Set(
 
     index = Lighting_Output_Instance_To_Index(object_instance);
     if (index < MAX_LIGHTING_OUTPUTS) {
-        // FIXME: check lighting command member values
+        /* FIXME: check lighting command member values */
         status = lighting_command_copy(
             &Lighting_Output[index].Lighting_Command, value);
-        // FIXME: set all the other values, and get the light levels moving
+        /* FIXME: set all the other values, and get the light levels moving */
     }
 
     return status;
@@ -904,8 +883,8 @@ bool Lighting_Output_Relinquish_Default_Set(
  */
 int Lighting_Output_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
 {
-    int len = 0;
     int apdu_len = 0; /* return value */
+    int apdu_size = 0;
     BACNET_BIT_STRING bit_string;
     BACNET_CHARACTER_STRING char_string;
     BACNET_LIGHTING_COMMAND lighting_command;
@@ -920,6 +899,7 @@ int Lighting_Output_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
         return 0;
     }
     apdu = rpdata->application_data;
+    apdu_size = rpdata->application_data_len;
     switch (rpdata->object_property) {
         case PROP_OBJECT_IDENTIFIER:
             apdu_len = encode_application_object_id(
@@ -995,59 +975,15 @@ int Lighting_Output_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
             apdu_len = encode_application_real(&apdu[0], real_value);
             break;
         case PROP_PRIORITY_ARRAY:
-            /* Array element zero is the number of elements in the array */
-            if (rpdata->array_index == 0) {
-                apdu_len =
-                    encode_application_unsigned(&apdu[0], BACNET_MAX_PRIORITY);
-                /* if no index was specified, then try to encode the entire list
-                 */
-                /* into one packet. */
-            } else if (rpdata->array_index == BACNET_ARRAY_ALL) {
-                for (i = 1; i <= BACNET_MAX_PRIORITY; i++) {
-                    if (Lighting_Output_Priority_Active(
-                            rpdata->object_instance, i)) {
-                        real_value = Lighting_Output_Priority_Value(
-                            rpdata->object_instance, i);
-                        len = encode_application_real(
-                            &apdu[apdu_len], real_value);
-                    } else {
-                        len = encode_application_null(&apdu[apdu_len]);
-                    }
-                    /* add it if we have room */
-                    if ((apdu_len + len) < MAX_APDU) {
-                        apdu_len += len;
-                    } else {
-                        rpdata->error_code =
-                            ERROR_CODE_ABORT_SEGMENTATION_NOT_SUPPORTED;
-                        apdu_len = BACNET_STATUS_ABORT;
-                        break;
-                    }
-                }
-            } else {
-                if (rpdata->array_index <= BACNET_MAX_PRIORITY) {
-                    if (Lighting_Output_Priority_Active(
-                            rpdata->object_instance, rpdata->array_index)) {
-                        real_value = Lighting_Output_Priority_Value(
-                            rpdata->object_instance, rpdata->array_index);
-                        len = encode_application_real(
-                            &apdu[apdu_len], real_value);
-                    } else {
-                        len = encode_application_null(&apdu[apdu_len]);
-                    }
-                    /* add it if we have room */
-                    if ((apdu_len + len) < MAX_APDU) {
-                        apdu_len += len;
-                    } else {
-                        rpdata->error_code =
-                            ERROR_CODE_ABORT_SEGMENTATION_NOT_SUPPORTED;
-                        apdu_len = BACNET_STATUS_ABORT;
-                        break;
-                    }
-                } else {
-                    rpdata->error_class = ERROR_CLASS_PROPERTY;
-                    rpdata->error_code = ERROR_CODE_INVALID_ARRAY_INDEX;
-                    apdu_len = BACNET_STATUS_ERROR;
-                }
+            apdu_len = bacnet_array_encode(rpdata->object_instance,
+                rpdata->array_index, Lighting_Output_Priority_Array_Encode,
+                BACNET_MAX_PRIORITY, apdu, apdu_size);
+            if (apdu_len == BACNET_STATUS_ABORT) {
+                rpdata->error_code =
+                    ERROR_CODE_ABORT_SEGMENTATION_NOT_SUPPORTED;
+            } else if (apdu_len == BACNET_STATUS_ERROR) {
+                rpdata->error_class = ERROR_CLASS_PROPERTY;
+                rpdata->error_code = ERROR_CODE_INVALID_ARRAY_INDEX;
             }
             break;
         case PROP_RELINQUISH_DEFAULT:
@@ -1060,6 +996,16 @@ int Lighting_Output_Read_Property(BACNET_READ_PROPERTY_DATA *rpdata)
                 Lighting_Output_Default_Priority(rpdata->object_instance);
             apdu_len = encode_application_unsigned(&apdu[0], unsigned_value);
             break;
+#if (BACNET_PROTOCOL_REVISION >= 17)
+        case PROP_CURRENT_COMMAND_PRIORITY:
+            i = Lighting_Output_Present_Value_Priority(rpdata->object_instance);
+            if ((i >= BACNET_MIN_PRIORITY) && (i <= BACNET_MAX_PRIORITY)) {
+                apdu_len = encode_application_unsigned(&apdu[0], i);
+            } else {
+                apdu_len = encode_application_null(&apdu[0]);
+            }
+            break;
+#endif
         default:
             rpdata->error_class = ERROR_CLASS_PROPERTY;
             rpdata->error_code = ERROR_CODE_UNKNOWN_PROPERTY;
@@ -1111,7 +1057,9 @@ bool Lighting_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
     }
     switch (wp_data->object_property) {
         case PROP_PRESENT_VALUE:
-            if (value.tag == BACNET_APPLICATION_TAG_REAL) {
+            status = write_property_type_valid(
+                wp_data, &value, BACNET_APPLICATION_TAG_REAL);
+            if (status) {
                 /* Command priority 6 is reserved for use by Minimum On/Off
                    algorithm and may not be used for other purposes in any
                    object. */
@@ -1129,8 +1077,8 @@ bool Lighting_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
                     wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
                 }
             } else {
-                status = WPValidateArgType(&value, BACNET_APPLICATION_TAG_NULL,
-                    &wp_data->error_class, &wp_data->error_code);
+                status = write_property_type_valid(
+                    wp_data, &value, BACNET_APPLICATION_TAG_NULL);
                 if (status) {
                     if (wp_data->priority == 6) {
                         /* Command priority 6 is reserved for use by Minimum
@@ -1152,21 +1100,20 @@ bool Lighting_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
             }
             break;
         case PROP_LIGHTING_COMMAND:
-            if (value.tag == BACNET_APPLICATION_TAG_LIGHTING_COMMAND) {
+            status = write_property_type_valid(
+                wp_data, &value, BACNET_APPLICATION_TAG_LIGHTING_COMMAND);
+            if (status) {
                 status = Lighting_Output_Lighting_Command_Set(
                     wp_data->object_instance, &value.type.Lighting_Command);
                 if (!status) {
                     wp_data->error_class = ERROR_CLASS_PROPERTY;
                     wp_data->error_code = ERROR_CODE_VALUE_OUT_OF_RANGE;
                 }
-            } else {
-                wp_data->error_class = ERROR_CLASS_PROPERTY;
-                wp_data->error_code = ERROR_CODE_INVALID_DATA_TYPE;
             }
             break;
         case PROP_OUT_OF_SERVICE:
-            status = WPValidateArgType(&value, BACNET_APPLICATION_TAG_BOOLEAN,
-                &wp_data->error_class, &wp_data->error_code);
+            status = write_property_type_valid(
+                wp_data, &value, BACNET_APPLICATION_TAG_BOOLEAN);
             if (status) {
                 Lighting_Output_Out_Of_Service_Set(
                     wp_data->object_instance, value.type.Boolean);
@@ -1186,6 +1133,9 @@ bool Lighting_Output_Write_Property(BACNET_WRITE_PROPERTY_DATA *wp_data)
         case PROP_DEFAULT_STEP_INCREMENT:
         case PROP_PRIORITY_ARRAY:
         case PROP_RELINQUISH_DEFAULT:
+#if (BACNET_PROTOCOL_REVISION >= 17)
+        case PROP_CURRENT_COMMAND_PRIORITY:
+#endif
             wp_data->error_class = ERROR_CLASS_PROPERTY;
             wp_data->error_code = ERROR_CODE_WRITE_ACCESS_DENIED;
             break;
@@ -1210,7 +1160,12 @@ static void Lighting_Output_Ramp_Handler(struct lighting_output_object *pLight,
     BACNET_LIGHTING_COMMAND *pCommand,
     uint16_t milliseconds)
 {
-    if (pLight && pCommand) { }
+    if (pLight && pCommand) {
+        /* FIXME: add ramp functionality */
+        (void)pLight;
+        (void)pCommand;
+        (void)milliseconds;
+    }
 }
 
 /**
@@ -1225,7 +1180,12 @@ static void Lighting_Output_Fade_Handler(struct lighting_output_object *pLight,
     BACNET_LIGHTING_COMMAND *pCommand,
     uint16_t milliseconds)
 {
-    if (pLight && pCommand) { }
+    if (pLight && pCommand) {
+        /* FIXME: add fade functionality */
+        (void)pLight;
+        (void)pCommand;
+        (void)milliseconds;
+    }
 }
 
 /**
@@ -1330,70 +1290,3 @@ void Lighting_Output_Init(void)
 
     return;
 }
-
-#ifdef BAC_TEST
-#include <assert.h>
-#include <string.h>
-#include "ctest.h"
-
-bool WPValidateArgType(BACNET_APPLICATION_DATA_VALUE *pValue,
-    uint8_t ucExpectedTag,
-    BACNET_ERROR_CLASS *pErrorClass,
-    BACNET_ERROR_CODE *pErrorCode)
-{
-    pValue = pValue;
-    ucExpectedTag = ucExpectedTag;
-    pErrorClass = pErrorClass;
-    pErrorCode = pErrorCode;
-
-    return false;
-}
-
-void testLightingOutput(Test *pTest)
-{
-    uint8_t apdu[MAX_APDU] = { 0 };
-    int len = 0;
-    uint32_t len_value = 0;
-    uint8_t tag_number = 0;
-    uint16_t decoded_type = 0;
-    uint32_t decoded_instance = 0;
-    BACNET_READ_PROPERTY_DATA rpdata;
-
-    Lighting_Output_Init();
-    rpdata.application_data = &apdu[0];
-    rpdata.application_data_len = sizeof(apdu);
-    rpdata.object_type = OBJECT_LIGHTING_OUTPUT;
-    rpdata.object_instance = 1;
-    rpdata.object_property = PROP_OBJECT_IDENTIFIER;
-    rpdata.array_index = BACNET_ARRAY_ALL;
-    len = Lighting_Output_Read_Property(&rpdata);
-    ct_test(pTest, len != 0);
-    len = decode_tag_number_and_value(&apdu[0], &tag_number, &len_value);
-    ct_test(pTest, tag_number == BACNET_APPLICATION_TAG_OBJECT_ID);
-    len = decode_object_id(&apdu[len], &decoded_type, &decoded_instance);
-    ct_test(pTest, decoded_type == rpdata.object_type);
-    ct_test(pTest, decoded_instance == rpdata.object_instance);
-
-    return;
-}
-
-#ifdef TEST_LIGHTING_OUTPUT
-int main(void)
-{
-    Test *pTest;
-    bool rc;
-
-    pTest = ct_create("BACnet Lighting Output", NULL);
-    /* individual tests */
-    rc = ct_addTestFunction(pTest, testLightingOutput);
-    assert(rc);
-
-    ct_setStream(pTest, stdout);
-    ct_run(pTest);
-    (void)ct_report(pTest);
-    ct_destroy(pTest);
-
-    return 0;
-}
-#endif /* TEST_LIGHTING_INPUT */
-#endif /* BAC_TEST */

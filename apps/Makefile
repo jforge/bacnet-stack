@@ -9,7 +9,12 @@
 
 # Passing parameters via command line or from Makefile export to this one
 BACNET_DEFINES ?=
-BACNET_LIB ?=
+
+# BACnet Library
+BACNET_LIB_DIR = $(realpath ./lib)
+BACNET_LIB_NAME = bacnet
+BACNET_LIB_TARGET = $(BACNET_LIB_DIR)/lib$(BACNET_LIB_NAME).a
+BACNET_LIB ?= -L$(BACNET_LIB_DIR),-l$(BACNET_LIB_NAME)
 
 # choose a datalink to build the example applications
 # Use BACDL=mstp or BACDL=bip and BBMD=server when invoking make
@@ -30,17 +35,24 @@ endif
 ifeq (${BACDL},bip6)
 BACDL_DEFINE=-DBACDL_BIP6=1
 endif
+ifeq (${BACDL},none)
+BACDL_DEFINE=-DBACDL_NONE=1
+endif
 ifeq (${BACDL},)
 BACDL_DEFINE ?= -DBACDL_BIP=1
 BBMD_DEFINE ?= -DBBMD_ENABLED=1 -DBBMD_CLIENT_ENABLED
 endif
 
+ifeq (${BBMD},none)
+BBMD_DEFINE = -DBBMD_ENABLED=0
+endif
 ifeq (${BBMD},server)
-BBMD_DEFINE=-DBBMD_ENABLED=1
+BBMD_DEFINE = -DBBMD_ENABLED=1
 endif
 ifeq (${BBMD},client)
 BBMD_DEFINE = -DBBMD_ENABLED=1 -DBBMD_CLIENT_ENABLED
 endif
+
 endif
 
 # Define WEAK_FUNC for unsupported or specific compilers
@@ -50,6 +62,20 @@ BACNET_DEFINES += -DWEAK_FUNC=
 BACNET_DEFINES += $(MAKE_DEFINE)
 
 # Choose a BACnet Ports Directory for the example applications target OS
+ifeq (${BACNET_PORT},)
+	ifeq ($(OS),Windows_NT)
+		BACNET_PORT = win32
+	else
+		UNAME_S := $(shell uname -s)
+		ifeq ($(UNAME_S),Linux)
+			BACNET_PORT = linux
+		endif
+		ifeq ($(UNAME_S),Darwin)
+			BACNET_PORT = bsd
+		endif
+	endif
+endif
+
 # linux, win32, bsd
 BACNET_PORT ?= linux
 
@@ -57,7 +83,7 @@ BACNET_PORT ?= linux
 ifeq (${UCI},1)
 BACNET_DEFINES += -DBAC_UCI
 UCI_LIB_DIR ?= /usr/local/lib
-BACNET_LIB += -L$(UCI_LIB_DIR),-luci
+BACNET_LIB += -L$(UCI_LIB_DIR) -luci
 endif
 # OS specific builds
 ifeq (${BACNET_PORT},linux)
@@ -71,6 +97,9 @@ TARGET_EXT =
 SYSTEM_LIB=-lc,-lm
 endif
 ifeq (${BACNET_PORT},win32)
+# winget install --id=MSYS2.MSYS2  -e
+# pacman -Syu mingw-w64-i686-toolchain
+# add alias make=mingw32-make.exe to .bashrc
 TARGET_EXT = .exe
 SYSTEM_LIB=-lws2_32,-lgcc,-lm,-liphlpapi,-lwinmm
 BACNET_DEFINES += -D_NO_OLDNAMES
@@ -80,10 +109,32 @@ endif
 BACNET_PORT_DIR =  $(realpath ../ports/$(BACNET_PORT))
 BACNET_SRC_DIR =  $(realpath ../src)
 
+# Compiler flag to set the C Standard level.
+# c89   - "ANSI" C - ISO C90
+# gnu89 - c89 plus GNU extensions
+# c90   - "ANSI" C - ISO C90
+# gnu90 - C90 with GNU extensions
+# c99   - ISO C99 standard
+# gnu99 - C99 plus GNU extensions
+# c11   - C11
+# gnu11 - C11 plus GNU extensions
+# c17   - C11 with corrections
+# note: default is compiled as ANSI C for widest compiler compatibilty
+# note: code that requires newer language features must use __STDC_VERSION__
+CSTANDARD ?= -std=gnu89
+
 #build for release (default) or debug
 OPTIMIZATION ?= -Os
 DEBUGGING ?=
-WARNINGS ?= -Wall -Wmissing-prototypes
+WARNING_ALL := -Wall -Wextra -Wfloat-equal -Wconversion -Wparentheses
+WARNING_ALL += -pedantic -Wunused-parameter -Wunused-variable -Wreturn-type
+WARNING_ALL += -Wunused-function -Wreturn-type -Wunused-value
+WARNING_ALL += -Wswitch-default -Wuninitialized -Winit-self
+WARNING_ALL += -Wno-sign-conversion -Wno-conversion -Wno-sign-compare
+WARNING_ALL += -Wno-long-long -Wno-implicit-fallthrough -Wno-attributes
+#WARNING_ALL += -Wredundant-decls
+#WARNING_ALL += -Werror
+WARNINGS ?= $(WARNING_ALL)
 # dead code removal
 ifeq (${BUILD},debug)
 OPTIMIZATION = -O0
@@ -93,102 +144,46 @@ BACNET_DEFINES += -DBIP_DEBUG
 endif
 endif
 
-# If BACNET_DEFINES has not already been set, configure to your needs here
-BACNET_DEFINES ?=
 BACNET_DEFINES += -DPRINT_ENABLED=1
 BACNET_DEFINES += -DBACAPP_ALL
 BACNET_DEFINES += -DBACFILE
 BACNET_DEFINES += -DINTRINSIC_REPORTING
 BACNET_DEFINES += -DBACNET_TIME_MASTER
 BACNET_DEFINES += -DBACNET_PROPERTY_LISTS=1
-BACNET_DEFINES += -DBACNET_PROTOCOL_REVISION=17
+BACNET_DEFINES += -DBACNET_PROTOCOL_REVISION=24
 
 # put all the flags together
 INCLUDES = -I$(BACNET_SRC_DIR) -I$(BACNET_PORT_DIR)
 CFLAGS += $(WARNINGS) $(DEBUGGING) $(OPTIMIZATION) $(BACNET_DEFINES) $(INCLUDES)
-LFLAGS += -Wl,$(SYSTEM_LIB)
+CFLAGS += $(CSTANDARD)
 ifneq (${BACNET_LIB},)
 LFLAGS += -Wl,$(BACNET_LIB)
 endif
+# BACnet library depends on system flags.
+# System flags must go after BACnet library flags.
+LFLAGS += -Wl,$(SYSTEM_LIB)
 # GCC dead code removal
 CFLAGS += -ffunction-sections -fdata-sections
+ifeq ($(shell uname -s),Darwin)
+LFLAGS += -Wl,-dead_strip
+else
 LFLAGS += -Wl,--gc-sections
-
-PORT_ARCNET_SRC = \
-	$(BACNET_PORT_DIR)/arcnet.c
-
-PORT_MSTP_SRC = \
-	$(BACNET_PORT_DIR)/rs485.c \
-	$(BACNET_PORT_DIR)/dlmstp.c \
-	$(BACNET_SRC_DIR)/bacnet/datalink/mstp.c \
-	$(BACNET_SRC_DIR)/bacnet/datalink/mstptext.c \
-	$(BACNET_SRC_DIR)/bacnet/datalink/crc.c
-
-PORT_ETHERNET_SRC = \
-	$(BACNET_PORT_DIR)/ethernet.c
-
-PORT_BIP_SRC = \
-	$(BACNET_PORT_DIR)/bip-init.c \
-	$(BACNET_SRC_DIR)/bacnet/datalink/bvlc.c \
-	$(BACNET_SRC_DIR)/bacnet/basic/bbmd/h_bbmd.c
-
-PORT_BIP6_SRC = \
-	$(BACNET_PORT_DIR)/bip6.c \
-	$(BACNET_SRC_DIR)/bacnet/basic/bbmd6/h_bbmd6.c \
-	$(BACNET_SRC_DIR)/bacnet/basic/bbmd6/vmac.c \
-	$(BACNET_SRC_DIR)/bacnet/datalink/bvlc6.c
-
-PORT_ALL_SRC = \
-	$(BACNET_SRC_DIR)/bacnet/datalink/datalink.c \
-	$(PORT_ARCNET_SRC) \
-	$(PORT_MSTP_SRC) \
-	$(PORT_ETHERNET_SRC) \
-	$(PORT_BIP_SRC) \
-	$(PORT_BIP6_SRC)
-
-ifeq (${BACDL_DEFINE},-DBACDL_BIP=1)
-BACNET_PORT_SRC = ${PORT_BIP_SRC}
 endif
-ifeq (${BACDL_DEFINE},-DBACDL_BIP6=1)
-BACNET_PORT_SRC = ${PORT_BIP6_SRC}
-endif
-ifeq (${BACDL_DEFINE},-DBACDL_MSTP=1)
-BACNET_PORT_SRC = ${PORT_MSTP_SRC}
-endif
-ifeq (${BACDL_DEFINE},-DBACDL_ARCNET=1)
-BACNET_PORT_SRC = ${PORT_ARCNET_SRC}
-endif
-ifeq (${BACDL_DEFINE},-DBACDL_ETHERNET=1)
-BACNET_PORT_SRC = ${PORT_ETHERNET_SRC}
-endif
-ifdef BACDL_ALL
-BACNET_PORT_SRC = ${PORT_ALL_SRC}
-endif
-
-BACNET_PORT_SRC += \
-	$(BACNET_SRC_DIR)/bacnet/datalink/dlenv.c \
-	$(BACNET_PORT_DIR)/mstimer-init.c \
-	$(BACNET_PORT_DIR)/datetime-init.c \
-
-BACNET_SRC ?= \
-	$(wildcard $(BACNET_SRC_DIR)/bacnet/*.c) \
-
-BACNET_BASIC_SRC ?= \
-	$(wildcard $(BACNET_SRC_DIR)/bacnet/basic/*.c) \
-	$(wildcard $(BACNET_SRC_DIR)/bacnet/basic/binding/*.c) \
-	$(wildcard $(BACNET_SRC_DIR)/bacnet/basic/sys/*.c) \
-	$(BACNET_SRC_DIR)/bacnet/basic/npdu/h_npdu.c \
-	$(BACNET_SRC_DIR)/bacnet/basic/npdu/s_router.c \
-	$(BACNET_SRC_DIR)/bacnet/basic/tsm/tsm.c
+# Debug linker commands
+# LFLAGS += -Wl,-v
 
 .EXPORT_ALL_VARIABLES:
 
-SUBDIRS = readprop writeprop readfile writefile reinit server dcc \
+SUBDIRS = lib readprop writeprop readfile writefile reinit server dcc \
 	whohas whois iam ucov scov timesync epics readpropm readrange \
-	writepropm uptransfer getevent uevent abort error event ack-alarm
+	writepropm uptransfer getevent uevent abort error event ack-alarm \
+	server-client add-list-element remove-list-element
 
 ifeq (${BACDL_DEFINE},-DBACDL_BIP=1)
-	SUBDIRS += whoisrouter iamrouter initrouter readbdt readfdt writebdt
+	SUBDIRS += whoisrouter iamrouter initrouter whatisnetnum netnumis
+	ifneq (${BBMD},none)
+	SUBDIRS += readbdt readfdt writebdt
+	endif
 endif
 
 ifeq (${BACNET_PORT},linux)
@@ -207,97 +202,159 @@ TARGETS = all clean
 $(TARGETS): %: $(patsubst %, %.%, $(SUBDIRS))
 
 $(foreach TGT, $(TARGETS), $(patsubst %, %.$(TGT), $(SUBDIRS))):
-	$(MAKE) -b -C $(subst ., , $@)
+	$(MAKE) -C $(subst ., , $@)
+
+.PHONY: lib
+lib: lib/Makefile Makefile $(BACNET_LIB_TARGET)
+
+$(BACNET_LIB_TARGET):
+	$(MAKE) -B -C lib
 
 .PHONY: gateway
-gateway:
-	$(MAKE) -b -C gateway
+gateway: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
 
-.PHONY: server
-server:
-	$(MAKE) -s -b -C $@
+.PHONY: abort
+abort: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: ack-alarm
+ack-alarm: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: add-list-element
+add-list-element: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@ clean all
+
+.PHONY: dcc
+dcc: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: epics
+epics: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: error
+error: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: event
+event: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: getevent
+getevent: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: iam
+iam: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: iamrouter
+iamrouter: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: initrouter
+initrouter: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: whatisnetnum
+whatisnetnum: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: netnumis
+netnumis: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
 
 .PHONY: mstpcap
 mstpcap:
-	$(MAKE) -b -C $@
+	$(MAKE) -B -C $@
 
 .PHONY: mstpcrc
 mstpcrc:
-	$(MAKE) -b -C $@
+	$(MAKE) -B -C $@
 
-.PHONY: abort
-abort:
-	$(MAKE) -b -C $@
+.PHONY: ptransfer
+ptransfer: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
 
-.PHONY: ack-alarm
-ack-alarm:
-	$(MAKE) -b -C $@
+.PHONY: readprop
+readprop: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
 
-.PHONY: dcc
-dcc:
-	$(MAKE) -b -C $@
-
-.PHONY: epics
-epics:
-	$(MAKE) -b -C $@
-
-.PHONY: error
-error:
-	$(MAKE) -b -C $@
-
-.PHONY: event
-event:
-	$(MAKE) -b -C $@
-
-.PHONY: getevent
-getevent:
-	$(MAKE) -b -C $@
-
-.PHONY: iam
-iam:
-	$(MAKE) -b -C $@
-
-.PHONY: iamrouter
-iamrouter:
-	$(MAKE) -b -C $@
-
-.PHONY: initrouter
-initrouter:
-	$(MAKE) -b -C $@
+.PHONY: readpropm
+readpropm: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
 
 .PHONY: readbdt
-readbdt:
-	$(MAKE) -b -C $@
+readbdt: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
 
 .PHONY: readfdt
-readfdt:
-	$(MAKE) -b -C $@
+readfdt: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: readfile
+readfile: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: readrange
+readrange: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: reinit
+reinit: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: remove-list-element
+remove-list-element: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@ clean all
+
+.PHONY: scov
+scov: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: server
+server: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: server-client
+server-client: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: timesync
+timesync: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
 
 .PHONY: uevent
-uevent:
-	$(MAKE) -b -C $@
+uevent: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
 
 .PHONY: whois
-whois:
-	$(MAKE) -b -C $@
+whois: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
 
 .PHONY: writebdt
-writebdt:
-	$(MAKE) -b -C $@
+writebdt: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
+
+.PHONY: writefile
+writefile: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
 
 .PHONY: router
-router:
-	$(MAKE) -s -b -C $@
+router: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
 
 .PHONY: router-ipv6
-router-ipv6:
-	$(MAKE) -b -C $@
+router-ipv6: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
 
 .PHONY: router-mstp
-router-mstp:
-	$(MAKE) -b -C $@
+router-mstp: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
 
 .PHONY: writepropm
-writepropm:
-	$(MAKE) -b -C $@
+writepropm: $(BACNET_LIB_TARGET)
+	$(MAKE) -B -C $@
 

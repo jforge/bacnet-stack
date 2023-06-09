@@ -101,6 +101,17 @@ config BACDL_BIP6_PORT
 	help
 		UDP port to listen on (default=47808)
 
+config BACNET_ADDRESS_CACHE_FILE
+	bool "BACnet Address Cache file functionality"
+	help
+		BACnet Address Cache file functionality
+
+config BACNET_USE_SECTION_ITERABLE_OBJECT_TABLE
+	bool "Use the Section Iterable for the Object Table"
+	default true
+	help
+		Use the Section Iterable for the Object Table
+
 rsource "subsys/Kconfig"
 
 endif # BACNETSTACK

@@ -29,20 +29,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
-#include <time.h> /* for time */
 #include <errno.h>
 #include "bacnet/basic/binding/address.h"
+#include "bacnet/bacaddr.h"
 #include "bacnet/bactext.h"
 #include "bacnet/config.h"
 #include "bacnet/bacdef.h"
 #include "bacnet/npdu.h"
 #include "bacnet/apdu.h"
+#include "bacnet/datetime.h"
 #include "bacnet/basic/object/device.h"
 #include "bacport.h"
 #include "bacnet/datalink/datalink.h"
 #include "bacnet/timesync.h"
 #include "bacnet/version.h"
 /* some demo stuff needed */
+#include "bacnet/basic/sys/mstimer.h"
 #include "bacnet/basic/sys/filename.h"
 #include "bacnet/basic/services.h"
 #include "bacnet/basic/services.h"
@@ -100,33 +102,46 @@ static void Init_Service_Handlers(void)
 static void print_usage(char *filename)
 {
     printf("Usage: %s [--dnet][--dadr][--mac]\n", filename);
+    printf("       [--date][--time]\n");
     printf("       [--version][--help]\n");
 }
 
 static void print_help(char *filename)
 {
-    printf("Send BACnet TimeSynchronization request.\n"
-           "\n"
-           "--mac A\n"
-           "BACnet mac address."
-           "Valid ranges are from 0 to 255\n"
-           "or an IP string with optional port number like 10.1.2.3:47808\n"
-           "or an Ethernet MAC in hex like 00:21:70:7e:32:bb\n"
-           "\n"
-           "--dnet N\n"
-           "BACnet network number N for directed requests.\n"
-           "Valid range is from 0 to 65535 where 0 is the local connection\n"
-           "and 65535 is network broadcast.\n"
-           "\n"
-           "--dadr A\n"
-           "BACnet mac address on the destination BACnet network number.\n"
-           "Valid ranges are from 0 to 255\n"
-           "or an IP string with optional port number like 10.1.2.3:47808\n"
-           "or an Ethernet MAC in hex like 00:21:70:7e:32:bb\n"
-           "\n");
+    printf("Send BACnet TimeSynchronization request.\n");
+    printf("\n");
+    printf("--date year/month/day[:weekday]\n"
+        "Date formatted 2021/12/31 or 2021/12/31:1\n"
+        "where day is 1..31,\n"
+        "where month is 1=January..12=December,\n"
+        "where weekday is 1=Monday..7=Sunday\n");
+    printf("\n");
+    printf("--time hours:minutes:seconds.hundredths\n"
+        "Time formatted 23:59:59.99 or 23:59:59 or 23:59\n");
+    printf("\n");
+    printf("--utc\n"
+        "Send BACnet UTCTimeSynchronization request.\n");
+    printf("\n");
+    printf("--mac A\n"
+        "BACnet mac address."
+        "Valid ranges are from 0 to 255\n"
+        "or an IP string with optional port number like 10.1.2.3:47808\n"
+        "or an Ethernet MAC in hex like 00:21:70:7e:32:bb\n");
+    printf("\n");
+    printf("--dnet N\n"
+        "BACnet network number N for directed requests.\n"
+        "Valid range is from 0 to 65535 where 0 is the local connection\n"
+        "and 65535 is network broadcast.\n");
+    printf("\n");
+    printf("--dadr A\n"
+        "BACnet mac address on the destination BACnet network number.\n"
+        "Valid ranges are from 0 to 255\n"
+        "or an IP string with optional port number like 10.1.2.3:47808\n"
+        "or an Ethernet MAC in hex like 00:21:70:7e:32:bb\n");
+    printf("\n");
     printf("Examples:\n"
-           "Send a TimeSynchronization request to DNET 123:\n"
-           "%s --dnet 123\n",
+        "Send a TimeSynchronization request to DNET 123:\n"
+        "%s --dnet 123\n",
         filename);
     printf(
         "Send a TimeSynchronization request to MAC 10.0.0.1 DNET 123 DADR 5:\n"
@@ -135,32 +150,24 @@ static void print_help(char *filename)
     printf("Send a TimeSynchronization request to MAC 10.1.2.3:47808:\n"
            "%s --mac 10.1.2.3:47808\n",
         filename);
-#if 0
-    /* FIXME: it would be nice to be able to send arbitrary time values */
-        "date format: year/month/day:dayofweek (e.g. 2006/4/1:6)\n"
-        "year: AD, such as 2006\n" "month: 1=January, 12=December\n"
-        "day: 1-31\n" "dayofweek: 1=Monday, 7=Sunday\n" "\n"
-        "time format: hour:minute:second.hundredths (e.g. 23:59:59.12)\n"
-        "hour: 0-23\n" "minute: 0-59\n" "second: 0-59\n"
-        "hundredths: 0-99\n" "\n"
-        "Optional device-instance sends a unicast time sync.\n",
-        filename);
-#endif
 }
 
 int main(int argc, char *argv[])
 {
     BACNET_ADDRESS src = { 0 }; /* address where message came from */
     uint16_t pdu_len = 0;
-    unsigned timeout = 100; /* milliseconds */
-    time_t elapsed_seconds = 0;
-    time_t last_seconds = 0;
-    time_t current_seconds = 0;
-    time_t timeout_seconds = 0;
-    time_t rawtime;
-    struct tm *my_time;
+    const unsigned timeout = 100; /* milliseconds */
     BACNET_DATE bdate;
     BACNET_TIME btime;
+    BACNET_DATE_TIME utc_time;
+    BACNET_DATE_TIME local_time;
+    bool override_date = false;
+    bool override_time = false;
+    bool use_utc = false;
+    int16_t utc_offset_minutes = 0;
+    int8_t dst_adjust_minutes = 0;
+    bool dst_active = 0;
+    struct mstimer apdu_timer;
     long dnet = -1;
     BACNET_MAC_ADDRESS mac = { 0 };
     BACNET_MAC_ADDRESS adr = { 0 };
@@ -188,7 +195,7 @@ int main(int argc, char *argv[])
         }
         if (strcmp(argv[argi], "--mac") == 0) {
             if (++argi < argc) {
-                if (address_mac_from_ascii(&mac, argv[argi])) {
+                if (bacnet_address_mac_from_ascii(&mac, argv[argi])) {
                     global_broadcast = false;
                 }
             }
@@ -203,10 +210,27 @@ int main(int argc, char *argv[])
         }
         if (strcmp(argv[argi], "--dadr") == 0) {
             if (++argi < argc) {
-                if (address_mac_from_ascii(&adr, argv[argi])) {
+                if (bacnet_address_mac_from_ascii(&adr, argv[argi])) {
                     global_broadcast = false;
                 }
             }
+        }
+        if (strcmp(argv[argi], "--date") == 0) {
+            if (++argi < argc) {
+                if (datetime_date_init_ascii(&bdate, argv[argi])) {
+                    override_date = true;
+                }
+            }
+        }
+        if (strcmp(argv[argi], "--time") == 0) {
+            if (++argi < argc) {
+                if (datetime_time_init_ascii(&btime, argv[argi])) {
+                    override_time = true;
+                }
+            }
+        }
+        if (strcmp(argv[argi], "--utc") == 0) {
+            use_utc = true;
         }
     }
     if (global_broadcast) {
@@ -246,40 +270,37 @@ int main(int argc, char *argv[])
     Init_Service_Handlers();
     dlenv_init();
     atexit(datalink_cleanup);
-    /* configure the timeout values */
-    last_seconds = time(NULL);
-    timeout_seconds = apdu_timeout() / 1000;
+    mstimer_init();
     /* send the request */
-    time(&rawtime);
-    my_time = localtime(&rawtime);
-    bdate.year = my_time->tm_year + 1900;
-    bdate.month = my_time->tm_mon + 1;
-    bdate.day = my_time->tm_mday;
-    bdate.wday = my_time->tm_wday ? my_time->tm_wday : 7;
-    btime.hour = my_time->tm_hour;
-    btime.min = my_time->tm_min;
-    btime.sec = my_time->tm_sec;
-    btime.hundredths = 0;
-    Send_TimeSync_Remote(&dest, &bdate, &btime);
+    datetime_local(override_date ? NULL : &bdate, override_time ? NULL : &btime,
+        &utc_offset_minutes, &dst_active);
+    if (use_utc) {
+        /* convert to UTC */
+        if (dst_active) {
+            dst_adjust_minutes = -60;
+        }
+        datetime_set(&local_time, &bdate, &btime);
+        datetime_local_to_utc(&utc_time, &local_time, utc_offset_minutes,
+            dst_adjust_minutes);
+        Send_TimeSyncUTC_Remote(&dest, &utc_time.date, &utc_time.time);
+    } else {
+        Send_TimeSync_Remote(&dest, &bdate, &btime);
+    }
+    mstimer_set(&apdu_timer, apdu_timeout());
     /* loop forever - not necessary for time sync, but we can watch */
     for (;;) {
-        /* increment timer - exit if timed out */
-        current_seconds = time(NULL);
         /* returns 0 bytes on timeout */
         pdu_len = datalink_receive(&src, &Rx_Buf[0], MAX_MPDU, timeout);
         /* process */
         if (pdu_len) {
             npdu_handler(&src, &Rx_Buf[0], pdu_len);
         }
-        if (Error_Detected)
-            break;
-        /* increment timer - exit if timed out */
-        elapsed_seconds += (current_seconds - last_seconds);
-        if (elapsed_seconds > timeout_seconds) {
+        if (Error_Detected) {
             break;
         }
-        /* keep track of time for next check */
-        last_seconds = current_seconds;
+        if (mstimer_expired(&apdu_timer)) {
+            break;
+        }
     }
 
     return 0;

@@ -29,12 +29,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h> /* for memmove */
-#include <time.h> /* for timezone, localtime */
 #include "bacnet/bacdef.h"
 #include "bacnet/bacdcode.h"
 #include "bacnet/bacenum.h"
 #include "bacnet/bacapp.h"
 #include "bacnet/config.h" /* the custom stuff */
+#include "bacnet/datetime.h"
 #include "bacnet/apdu.h"
 #include "bacnet/wp.h" /* write property handling */
 #include "bacnet/rp.h" /* read property handling */
@@ -59,14 +59,8 @@
 #if defined(BACFILE)
 #include "bacnet/basic/object/bacfile.h" /* object list dependency */
 #endif
-/* os specfic includes */
+/* os specific includes */
 #include "bacnet/basic/sys/mstimer.h"
-
-#if defined(__BORLANDC__) || defined(_WIN32)
-/* seems to not be defined in time.h as specified by The Open Group */
-/* difference from UTC and local standard time  */
-long int timezone;
-#endif
 
 /* local forward and external prototypes */
 extern int Device_Read_Property_Local(BACNET_READ_PROPERTY_DATA *rpdata);
@@ -219,14 +213,14 @@ void routed_get_my_address(BACNET_ADDRESS *my_address)
  *         meaning MAC broadcast, so it's an automatic match).
  *         Else False if no match or invalid idx is given.
  */
-bool Routed_Device_Address_Lookup(
-    int idx, uint8_t dlen, uint8_t *dadr)
+bool Routed_Device_Address_Lookup(int idx, uint8_t dlen, uint8_t *dadr)
 {
     bool result = false;
-    DEVICE_OBJECT_DATA *pDev = &Devices[idx];
+    DEVICE_OBJECT_DATA *pDev;
     int i;
 
     if ((idx >= 0) && (idx < MAX_NUM_DEVICES)) {
+        pDev = &Devices[idx];
         if (dlen == 0) {
             /* Automatic match */
             iCurrent_Device_Idx = idx;
@@ -243,6 +237,7 @@ bool Routed_Device_Address_Lookup(
             }
         }
     }
+
     return result;
 }
 
@@ -377,15 +372,12 @@ uint32_t Routed_Device_Index_To_Instance(unsigned index)
  * @param  object_instance - object-instance number of the object
  * @return  index for the given instance-number, or 0 if not valid.
  */
-static uint32_t Routed_Device_Instance_To_Index(
-        uint32_t Instance_Number)
+static uint32_t Routed_Device_Instance_To_Index(uint32_t Instance_Number)
 {
     int i;
 
-
-    for ( i=0; i < MAX_NUM_DEVICES; i++) {
-        if (Devices[i].bacObj.Object_Instance_Number == Instance_Number)
-        {
+    for (i = 0; i < MAX_NUM_DEVICES; i++) {
+        if (Devices[i].bacObj.Object_Instance_Number == Instance_Number) {
             /* Found Instance, so return the Device Index Number */
             return i;
         }
@@ -394,7 +386,6 @@ static uint32_t Routed_Device_Instance_To_Index(
     /* We did not find instance... so simply return an Index of 0
        All gateways will have at least a single root Device Object */
     return 0;
-
 }
 
 /**
@@ -498,8 +489,8 @@ bool Routed_Device_Write_Property_Local(BACNET_WRITE_PROPERTY_DATA *wp_data)
     /* FIXME: len < application_data_len: more data? */
     switch (wp_data->object_property) {
         case PROP_OBJECT_IDENTIFIER:
-            status = WPValidateArgType(&value, BACNET_APPLICATION_TAG_OBJECT_ID,
-                &wp_data->error_class, &wp_data->error_code);
+            status = write_property_type_valid(
+                wp_data, &value, BACNET_APPLICATION_TAG_OBJECT_ID);
             if (status) {
                 if ((value.type.Object_Id.type == OBJECT_DEVICE) &&
                     (Routed_Device_Set_Object_Instance_Number(
@@ -514,8 +505,8 @@ bool Routed_Device_Write_Property_Local(BACNET_WRITE_PROPERTY_DATA *wp_data)
             }
             break;
         case PROP_OBJECT_NAME:
-            status = WPValidateString(&value, MAX_DEV_NAME_LEN, false,
-                &wp_data->error_class, &wp_data->error_code);
+            status =
+                write_property_string_valid(wp_data, &value, MAX_DEV_NAME_LEN);
             if (status) {
                 Routed_Device_Set_Object_Name(
                     characterstring_encoding(&value.type.Character_String),
@@ -619,14 +610,16 @@ void Routed_Device_Inc_Database_Revision(void)
  *          just 1 if no apdu_buff was supplied and service is not supported,
  *          else 0 if service is approved for the current device.
  */
-int Routed_Device_Service_Approval(BACNET_CONFIRMED_SERVICE service,
+int Routed_Device_Service_Approval(BACNET_SERVICES_SUPPORTED service,
     int service_argument,
     uint8_t *apdu_buff,
     uint8_t invoke_id)
 {
     int len = 0;
+
+    (void)service_argument;
     switch (service) {
-        case SERVICE_CONFIRMED_REINITIALIZE_DEVICE:
+        case SERVICE_SUPPORTED_REINITIALIZE_DEVICE:
             /* If not the gateway device, we don't support RD */
             if (iCurrent_Device_Idx > 0) {
                 if (apdu_buff != NULL) {
@@ -637,7 +630,7 @@ int Routed_Device_Service_Approval(BACNET_CONFIRMED_SERVICE service,
                 }
             }
             break;
-        case SERVICE_CONFIRMED_DEVICE_COMMUNICATION_CONTROL:
+        case SERVICE_SUPPORTED_DEVICE_COMMUNICATION_CONTROL:
             /* If not the gateway device, we don't support DCC */
             if (iCurrent_Device_Idx > 0) {
                 if (apdu_buff != NULL) {
@@ -652,5 +645,6 @@ int Routed_Device_Service_Approval(BACNET_CONFIRMED_SERVICE service,
             /* Everything else is a pass, at this time. */
             break;
     }
+
     return len;
 }

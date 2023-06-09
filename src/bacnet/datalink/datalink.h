@@ -30,6 +30,7 @@
 
 #if defined(BACDL_ETHERNET)
 #include "bacnet/datalink/ethernet.h"
+#define MAX_MPDU ETHERNET_MPDU_MAX
 
 #define datalink_init ethernet_init
 #define datalink_send_pdu ethernet_send_pdu
@@ -41,6 +42,7 @@
 
 #elif defined(BACDL_ARCNET)
 #include "bacnet/datalink/arcnet.h"
+#define MAX_MPDU ARCNET_MPDU_MAX
 
 #define datalink_init arcnet_init
 #define datalink_send_pdu arcnet_send_pdu
@@ -52,6 +54,7 @@
 
 #elif defined(BACDL_MSTP)
 #include "bacnet/datalink/dlmstp.h"
+#define MAX_MPDU DLMSTP_MPDU_MAX
 
 #define datalink_init dlmstp_init
 #define datalink_send_pdu dlmstp_send_pdu
@@ -65,6 +68,7 @@
 #include "bacnet/datalink/bip.h"
 #include "bacnet/datalink/bvlc.h"
 #include "bacnet/basic/bbmd/h_bbmd.h"
+#define MAX_MPDU BIP_MPDU_MAX
 
 #define datalink_init bip_init
 #define datalink_send_pdu bip_send_pdu
@@ -72,9 +76,15 @@
 #define datalink_cleanup bip_cleanup
 #define datalink_get_broadcast_address bip_get_broadcast_address
 #ifdef BAC_ROUTING
+#ifdef __cplusplus
+extern "C" {
+#endif
 BACNET_STACK_EXPORT
 void routed_get_my_address(
     BACNET_ADDRESS * my_address);
+#ifdef __cplusplus
+}
+#endif
 #define datalink_get_my_address routed_get_my_address
 #else
 #define datalink_get_my_address bip_get_my_address
@@ -85,6 +95,8 @@ void routed_get_my_address(
 #include "bacnet/datalink/bip6.h"
 #include "bacnet/datalink/bvlc6.h"
 #include "bacnet/basic/bbmd6/h_bbmd6.h"
+#define MAX_MPDU BIP6_MPDU_MAX
+
 #define datalink_init bip6_init
 #define datalink_send_pdu bip6_send_pdu
 #define datalink_receive bip6_receive
@@ -93,7 +105,7 @@ void routed_get_my_address(
 #define datalink_get_my_address bip6_get_my_address
 #define datalink_maintenance_timer(s) bvlc6_maintenance_timer(s)
 
-#elif defined(BACDL_ALL) || defined(BACDL_NONE)
+#elif defined(BACDL_ALL) || defined(BACDL_NONE) || defined(BACDL_CUSTOM)
 #include "bacnet/npdu.h"
 
 #define MAX_HEADER (8)
@@ -102,6 +114,9 @@ void routed_get_my_address(
 #ifdef __cplusplus
 extern "C" {
 #endif /* __cplusplus */
+
+    BACNET_STACK_EXPORT
+    bool datalink_init(char *ifname);
 
     BACNET_STACK_EXPORT
     int datalink_send_pdu(
@@ -165,6 +180,7 @@ extern "C" {
  * - BACDL_ALL      -- Unspecified for the build, so the transport can be
  *                     chosen at runtime from among these choices.
  * - BACDL_NONE      -- Unspecified for the build for unit testing
+ * - BACDL_CUSTOM    -- For externally linked datalink_xxx functions
  * - Clause 10 POINT-TO-POINT (PTP) and Clause 11 EIA/CEA-709.1 ("LonTalk") LAN
  *   are not currently supported by this project.
                                                                                                                                                                                               *//** @defgroup DLTemplates DataLink Template Functions
